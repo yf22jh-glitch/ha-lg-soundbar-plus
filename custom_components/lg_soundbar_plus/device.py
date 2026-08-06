@@ -8,8 +8,10 @@ here is driven by the push callback plus a single fetch at connect time.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 
 import temescal
@@ -20,6 +22,7 @@ from .const import (
     MSG_EQ,
     MSG_FUNC,
     MSG_PLAY,
+    MSG_PRODUCT,
     MSG_SETTING,
     MSG_SPK_LIST,
     SOURCE_ALIASES,
@@ -28,6 +31,19 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Replies the first dump has to deliver before entities can be built. Which
+# switches and trim levels exist is decided from SETTING_VIEW_INFO, so setting
+# up the platforms before it lands silently produces a media player and nothing
+# else. EQ_VIEW_INFO is needed for the sound mode list, SPK_LIST_VIEW_INFO for
+# the volume range, FUNC_VIEW_INFO for the current input.
+INITIAL_DUMP: frozenset[str] = frozenset(
+    {MSG_SPK_LIST, MSG_FUNC, MSG_SETTING, MSG_EQ}
+)
+
+# How long to wait for that dump. Replies normally arrive well inside a second;
+# this only has to cover a speaker that is slow to wake.
+INITIAL_DUMP_TIMEOUT = 15
 
 
 class LGSoundbarDevice:
@@ -41,6 +57,13 @@ class LGSoundbarDevice:
         self._speaker: temescal.temescal | None = None
         self._listeners: list[Callable[[], None]] = []
         self.available = False
+
+        # Which message types have been seen, and an event fired once the first
+        # dump is complete. Replies come back on temescal's listener thread, so
+        # setup has to wait on this rather than assume the requests were
+        # answered by the time they returned.
+        self._seen: set[str] = set()
+        self._dump_complete = asyncio.Event()
 
         # Last payload seen per message type. The device sends partial updates
         # (a volume change carries only the volume fields), so these are merged
@@ -57,9 +80,29 @@ class LGSoundbarDevice:
     # ------------------------------------------------------------------
 
     async def async_setup(self) -> None:
-        """Connect and pull the initial state once."""
+        """Connect, pull the initial state, and wait for it to arrive.
+
+        The wait matters: the requests are fire-and-forget and every reply is
+        pushed back asynchronously, so returning as soon as they are sent would
+        hand the platforms an empty state and they would create no entities.
+        """
         await self.hass.async_add_executor_job(self._connect)
         await self.async_refresh()
+
+        with suppress(TimeoutError):
+            async with asyncio.timeout(INITIAL_DUMP_TIMEOUT):
+                await self._dump_complete.wait()
+
+        if missing := INITIAL_DUMP - self._seen:
+            # Not fatal — the media player still works off whatever arrives
+            # later — but entities keyed off the missing message will be absent
+            # until the entry is reloaded.
+            _LOGGER.warning(
+                "%s did not answer %s within %ss; some entities may be missing",
+                self.host,
+                ", ".join(sorted(missing)),
+                INITIAL_DUMP_TIMEOUT,
+            )
 
     def _connect(self) -> None:
         """Create the temescal client (blocking)."""
@@ -121,16 +164,19 @@ class LGSoundbarDevice:
             self.eq.update(data)
         elif msg == MSG_PLAY:
             self.play.update(data)
-        elif msg == "PRODUCT_INFO":
+        elif msg == MSG_PRODUCT:
             self.product.update(data)
         else:
             return
 
         self.available = True
-        self.hass.loop.call_soon_threadsafe(self._notify)
+        self.hass.loop.call_soon_threadsafe(self._notify, msg)
 
     @callback
-    def _notify(self) -> None:
+    def _notify(self, msg: str) -> None:
+        self._seen.add(msg)
+        if not self._dump_complete.is_set() and INITIAL_DUMP <= self._seen:
+            self._dump_complete.set()
         for listener in list(self._listeners):
             listener()
 

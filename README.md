@@ -85,3 +85,7 @@ this integration handles input, sound mode, trim and settings.
 
 Builds on [temescal](https://github.com/google/python-temescal) by Matthew
 Garrett for the wire protocol.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "LG Soundbar Plus",
+        "description": "Enter the address of the soundbar. Port 9741 is the LG control protocol and is normally already open.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the soundbar on that address and port."
+    },
+    "abort": {
+      "already_configured": "This soundbar is already set up."
+    }
+  }
+}

@@ -1,0 +1,61 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Daily, so a Home Assistant release that breaks this shows up here before
+    # it reaches the user's instance.
+    - cron: "0 6 * * *"
+
+jobs:
+  hassfest:
+    name: hassfest (HA manifest/structure)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # 'brands' only matters for HACS default-store inclusion, not for
+          # custom-repository installs.
+          ignore: brands
+
+  imports:
+    name: Import against latest Home Assistant
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # HA 2026.7+ needs Python 3.14; on 3.13 pip quietly resolves to an
+          # older HA and the "latest" check stops meaning anything.
+          python-version: "3.14"
+      - name: Install latest Home Assistant + deps
+        run: pip install --upgrade homeassistant temescal
+      - name: Import all integration modules
+        run: |
+          export PYTHONPATH="$PWD/custom_components"
+          python - <<'PY'
+          import importlib
+          for module in [
+              "lg_soundbar_plus",
+              "lg_soundbar_plus.const",
+              "lg_soundbar_plus.device",
+              "lg_soundbar_plus.entity",
+              "lg_soundbar_plus.config_flow",
+              "lg_soundbar_plus.media_player",
+              "lg_soundbar_plus.number",
+              "lg_soundbar_plus.switch",
+          ]:
+              importlib.import_module(module)
+              print("ok", module)
+          PY

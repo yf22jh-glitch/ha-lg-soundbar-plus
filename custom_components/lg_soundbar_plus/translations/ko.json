@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "LG 사운드바 Plus",
+        "description": "사운드바의 주소를 입력하세요. 9741 포트는 LG 제어 프로토콜이며 보통 이미 열려 있습니다.",
+        "data": {
+          "host": "호스트",
+          "port": "포트"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "해당 주소와 포트로 사운드바에 연결하지 못했습니다."
+    },
+    "abort": {
+      "already_configured": "이미 등록된 사운드바입니다."
+    }
+  }
+}

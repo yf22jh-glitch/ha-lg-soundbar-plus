@@ -1,0 +1,16 @@
+{
+  "domain": "lg_soundbar_plus",
+  "name": "LG Soundbar Plus",
+  "codeowners": [
+    "@yf22jh-glitch"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/yf22jh-glitch/ha-lg-soundbar-plus",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/yf22jh-glitch/ha-lg-soundbar-plus/issues",
+  "requirements": [
+    "temescal==0.5"
+  ],
+  "version": "0.1.0"
+}

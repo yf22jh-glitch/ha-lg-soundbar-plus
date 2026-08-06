@@ -171,12 +171,16 @@ class LGSoundbarMediaPlayer(LGSoundbarEntity, MediaPlayerEntity):
         await self.device.async_call("set_func", self._last_active_source)
 
     async def async_turn_off(self) -> None:
-        """Send the speaker to standby.
+        """Arm a one-minute sleep timer.
 
-        There is no immediate power-off on this hardware. The b_powerkey field
-        the core integration uses is ignored outright here — it draws no
-        response and changes nothing, with or without an active input signal.
-        A one-minute sleep timer is the shortest standby trigger that works.
+        This does not reliably reach standby, and nothing found so far does.
+        The b_powerkey field the core integration uses is ignored outright —
+        no response, no state change, with or without an input signal. The
+        sleep timer at least gets accepted, but it has been observed counting
+        down, clearing itself, and leaving the speaker awake on the same input.
+
+        It stays wired up because the LG app can put this hardware to sleep, so
+        a real command exists; this is where it goes once it is identified.
         """
         await self.device.async_call("set_sleep_time", TURN_OFF_SLEEP_MINUTES)
 

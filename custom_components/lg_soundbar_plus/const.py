@@ -113,8 +113,12 @@ SLEEP_MAX: Final = 180
 
 # turn_off has no direct command on this hardware. b_powerkey (what the core
 # integration sends) is ignored outright: it produces no response and no state
-# change, matching reports from other LG soundbar owners. The shortest working
-# standby trigger found is a one-minute sleep timer.
+# change, matching reports from other LG soundbar owners.
+#
+# A one-minute sleep timer is the nearest thing, and it is not sufficient: the
+# device accepts it, counts it down, clears it, and stays awake on the same
+# input. It is used anyway because it is the only standby-adjacent command that
+# the hardware acknowledges at all.
 TURN_OFF_SLEEP_MINUTES: Final = 1
 
 SIGNAL_UPDATE: Final = f"{DOMAIN}_update"

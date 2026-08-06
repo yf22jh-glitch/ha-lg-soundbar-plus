@@ -14,7 +14,7 @@ the `temescal` library.
 |---|---|---|
 | Power state | Stuck on, forever | Derived from the active input, updated by push |
 | Input list | Taken from the speaker's own list, which is wrong | Verified table, so the current input is always in the list |
-| Turn off | Sends a field this hardware ignores | One-minute sleep timer, the only trigger that works |
+| Turn off | Sends a field this hardware ignores | Arms a one-minute sleep timer — see the caveat below |
 | Speaker trim | — | Woofer, rear, centre, top |
 | Settings | — | DRC, Neural:X, night mode, auto volume, auto power, TV remote, rear speakers |
 | Sleep timer | — | Exposed as a number |
@@ -32,13 +32,28 @@ updates and defaults to on permanently. Power is inferred here from
 `i_curr_func` instead: the speaker parks on the network input in standby and
 moves to a real input when it wakes.
 
-**There is no working power command.** `b_powerkey` — what the core
-integration sends for turn on and turn off — produces no response and no state
-change. That held with an active input signal and without one, with
-`b_auto_power` on and off, and with sixty seconds of passive listening
-afterwards so a wake-on-poll could not mask it. `b_powerstatus`, `b_power`,
-`i_power` and `b_standby` are all unsupported as writes. A sleep timer of one
-minute is the shortest standby trigger that actually fires.
+**There is no working power command, and no working standby trigger either.**
+`b_powerkey` — what the core integration sends for turn on and turn off —
+produces no response and no state change. That held with an active input
+signal and without one, with `b_auto_power` on and off, and with sixty seconds
+of passive listening afterwards so a wake-on-poll could not mask it.
+`b_powerstatus`, `b_power`, `i_power` and `b_standby` are all unsupported as
+writes.
+
+A one-minute sleep timer is the closest thing found, and it is not enough. The
+timer is accepted, counts down, and clears itself — and the speaker stays
+awake on the same input. Measured end to end: the timer was armed at 11:07:44
+and had cleared itself by 11:09:43, and eighty minutes later a fresh
+connection asked `get_func()` and got `i_curr_func: 4` back in under a second,
+with the TV off the whole time. `turn_off` therefore arms a timer rather than
+turning anything off, which is the honest description of what it does.
+
+**Standby, if it happens, is not announced.** Over the same eighty minutes the
+speaker pushed nothing at all, on a socket that had never reconnected
+(`bytes_sent` still carried the original requests). So an integration that
+does not poll cannot currently distinguish "awake on Optical" from "asleep and
+silent". Here the speaker really was awake, so power state is right in
+practice — but the mechanism has not been tested against a genuine standby.
 
 **The speaker's own input list is wrong.** It advertises
 `ai_func_list = [0, 1, 15, 6, 19]`, but sweeping every index shows the ones it
@@ -69,10 +84,13 @@ this integration handles input, sound mode, trim and settings.
 
 ## Known gaps
 
-- **Turning off takes a minute.** No immediate standby command has been found
-  yet. The LG mobile app appears to do it instantly, so the command exists —
-  capturing what the app sends on port 9741 would settle it. The protocol uses
-  a fixed AES-256-CBC key, so a capture is fully decryptable.
+- **Turning off does not work.** `turn_off` arms a one-minute sleep timer,
+  which the speaker then ignores; nothing found so far puts this hardware into
+  standby. The service is kept because the LG mobile app does manage it, so a
+  real command exists and this is where it will go once found. Capturing what
+  the app sends on port 9741 would settle it — the protocol uses a fixed
+  AES-256-CBC key, so a capture is fully decryptable. Until then, treat
+  `turn_off` as "start a sleep timer", not as power off.
 - **AV sync** is reported but the device does not report a valid range for it,
   so no entity is created rather than guessing one.
 - **Side and dialogue levels** are reported but `temescal` has no setter for

@@ -12,7 +12,7 @@ the `temescal` library.
 
 | | Core `lg_soundbar` | This integration |
 |---|---|---|
-| Power state | Stuck on, forever | Derived from the active input, updated by push |
+| Power state | Stuck on, forever | Derived from the active input and live playback |
 | Input list | Taken from the speaker's own list, which is wrong | Verified table, so the current input is always in the list |
 | Turn off | Sends a field this hardware ignores | Arms a one-minute sleep timer — see the caveat below |
 | Speaker trim | — | Woofer, rear, centre, top |
@@ -39,6 +39,15 @@ signal and without one, with `b_auto_power` on and off, and with sixty seconds
 of passive listening afterwards so a wake-on-poll could not mask it.
 `b_powerstatus`, `b_power`, `i_power` and `b_standby` are all unsupported as
 writes.
+
+`b_powerkey` is not a toggle — on newer bars `true` powers on and `false`
+powers off, captured from the official app by
+[diogolccsilva/ha-lg-soundbar](https://github.com/diogolccsilva/ha-lg-soundbar)
+against an S95TR. Both values were sent to this unit and neither moved
+`i_curr_func`. Those bars also report `b_powerstatus`, which this one does not,
+so power control looks like a firmware capability the SN series simply lacks
+rather than something still to be found. Note also that the LG app itself
+offers no sleep control for this model.
 
 A one-minute sleep timer is the closest thing found, and it is not enough. The
 timer is accepted, counts down, and clears itself — and the speaker stays
@@ -83,9 +92,10 @@ advertised list.
 (`i_woofer_level: 21`). Writing 0, 3 and 15 reads back verbatim, and writing
 -3 reads back as 3. So `dB = raw + min`, and the conversion is done here.
 
-**Barely poll.** Requests are avoided because they light the front panel; the sole exception is the playback check above.
-This integration fetches once at startup and then relies entirely on the
-device's push messages, which arrive within a second of a real change.
+**Barely poll.** Requests light the speaker's front panel, so this fetches once
+at startup and then relies on push messages, which arrive within a second of a
+real change. The playback check above is the sole exception, and it only runs
+while there is a cached track to disprove.
 
 ## Install
 
@@ -99,17 +109,19 @@ this integration handles input, sound mode, trim and settings.
 
 ## Known gaps
 
-- **Turning off does not work.** `turn_off` arms a one-minute sleep timer,
-  which the speaker then ignores; nothing found so far puts this hardware into
-  standby. The service is kept because the LG mobile app does manage it, so a
-  real command exists and this is where it will go once found. Capturing what
-  the app sends on port 9741 would settle it — the protocol uses a fixed
-  AES-256-CBC key, so a capture is fully decryptable. Until then, treat
-  `turn_off` as "start a sleep timer", not as power off.
-- **AV sync** is reported but the device does not report a valid range for it,
-  so no entity is created rather than guessing one.
-- **Side and dialogue levels** are reported but `temescal` has no setter for
-  them, so they are read-only and not exposed.
+- **Turning off does not work on the SN series**, and on the evidence above it
+  cannot be made to: there is no power command this firmware answers, and no
+  power status field to read back. `turn_off` arms a one-minute sleep timer
+  because that is the only standby-adjacent write the bar acknowledges at all —
+  treat it as "start a sleep timer", not as power off. On bars that report
+  `b_powerstatus`, `b_powerkey: false` is the real thing and belongs here.
+- **AV sync** is not exposed yet. The bar reports `i_av_sync` without bounds;
+  the scale is 1–30 in 10 ms steps (0–300 ms), which the S95TR work above
+  establishes, so this is implementable rather than unknown.
+- **Side and dialogue levels** are reported with usable ranges but `temescal`
+  has no setter for them, so exposing them needs a raw packet.
+- **Bass and treble** (`i_bass`, `i_treble` in `EQ_VIEW_INFO`) are reported and
+  not yet exposed.
 - Only tested on an SN-series unit. Other models are likely to need their own
   entries in the source table — the media player exposes the raw index as a
   `source_index` attribute to make that easy to work out.

@@ -153,6 +153,7 @@ class LGSoundbarDevice:
         """Merge a pushed message. Runs on temescal's listener thread."""
         data = response.get("data") or {}
         msg = response.get("msg")
+        previous_source = self.source_id
 
         if msg == MSG_SPK_LIST:
             self.spk.update(data)
@@ -168,6 +169,16 @@ class LGSoundbarDevice:
             self.product.update(data)
         else:
             return
+
+        # Track info belongs to the input that was playing it. The speaker does
+        # not retract it on a switch, so drop it here rather than let it trail
+        # the next input around.
+        if (
+            msg != MSG_PLAY
+            and previous_source is not None
+            and self.source_id != previous_source
+        ):
+            self.play.clear()
 
         self.available = True
         self.hass.loop.call_soon_threadsafe(self._notify, msg)
@@ -223,19 +234,24 @@ class LGSoundbarDevice:
 
     @property
     def is_on(self) -> bool:
-        """Whether the speaker is doing something.
+        """Whether a real input is selected.
 
-        This hardware never sends b_powerstatus, so power is inferred from the
-        active input: it parks on the network input (0) in standby and moves to
-        a real input when it wakes. Network playback still counts as on, which
-        is why PLAY_INFO is consulted for the idle case.
+        This hardware never sends b_powerstatus, so the selected input is all
+        there is to go on: the speaker parks on the network input (0) and moves
+        to a physical one when it wakes.
+
+        Network playback deliberately does not count. PLAY_INFO would be the
+        only way to spot it, and it cannot be trusted here: the speaker answers
+        a query for it truthfully but never pushes the transition to empty, so
+        a cached title outlives the playback that produced it indefinitely —
+        observed still reporting a streaming app twelve hours after the fact.
+        Whatever is streaming over the network already has its own media player
+        entity in Home Assistant; this one reports the amplifier.
         """
         source_id = self.source_id
         if source_id is None:
             return False
-        if source_id != SOURCE_IDLE:
-            return True
-        return bool(self.play.get("s_title") or self.play.get("i_stream_type"))
+        return source_id != SOURCE_IDLE
 
     def setting_int(self, key: str) -> int | None:
         """Read an int out of SETTING_VIEW_INFO."""

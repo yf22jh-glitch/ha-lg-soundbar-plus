@@ -48,12 +48,21 @@ connection asked `get_func()` and got `i_curr_func: 4` back in under a second,
 with the TV off the whole time. `turn_off` therefore arms a timer rather than
 turning anything off, which is the honest description of what it does.
 
-**Standby, if it happens, is not announced.** Over the same eighty minutes the
-speaker pushed nothing at all, on a socket that had never reconnected
-(`bytes_sent` still carried the original requests). So an integration that
-does not poll cannot currently distinguish "awake on Optical" from "asleep and
-silent". Here the speaker really was awake, so power state is right in
-practice — but the mechanism has not been tested against a genuine standby.
+**Standby is not announced.** Over the same eighty minutes the speaker pushed
+nothing at all, on a socket that had never reconnected (`bytes_sent` still
+carried the original requests). Power state is therefore read from the
+selected input: the speaker parks on the network input in standby and moves to
+a physical one when it wakes.
+
+**PLAY_INFO cannot be cached.** The speaker answers a query for it honestly —
+an idle speaker returns `{}` — but it never *pushes* the transition to empty.
+A title picked up while something was streaming therefore outlives the
+playback that produced it for as long as nobody asks again; one was observed
+still being reported twelve hours later, on a speaker that had been idle the
+whole time. Nothing here infers power from it, and the media title is withheld
+while the speaker is in standby. Network playback is left to whichever
+integration owns that stream — a Cast or Music Assistant entity for the same
+speaker knows about it first-hand, and this integration reports the amplifier.
 
 **The speaker's own input list is wrong.** It advertises
 `ai_func_list = [0, 1, 15, 6, 19]`, but sweeping every index shows the ones it

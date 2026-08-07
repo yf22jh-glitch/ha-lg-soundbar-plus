@@ -190,12 +190,21 @@ class LGSoundbarMediaPlayer(LGSoundbarEntity, MediaPlayerEntity):
 
     @property
     def media_title(self) -> str | None:
-        """Track title, when the speaker is streaming."""
+        """What the speaker last reported playing, while it is awake.
+
+        Withheld in standby: the speaker never pushes the end of playback, so
+        a cached title would otherwise sit on a sleeping speaker for as long as
+        nobody touched it.
+        """
+        if not self.device.is_on:
+            return None
         return (self.device.play.get("s_title") or "").strip() or None
 
     @property
     def media_artist(self) -> str | None:
-        """Track artist, when the speaker is streaming."""
+        """Track artist, on the same terms as the title."""
+        if not self.device.is_on:
+            return None
         return (self.device.play.get("s_artist") or "").strip() or None
 
     @property

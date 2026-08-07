@@ -54,15 +54,21 @@ carried the original requests). Power state is therefore read from the
 selected input: the speaker parks on the network input in standby and moves to
 a physical one when it wakes.
 
-**PLAY_INFO cannot be cached.** The speaker answers a query for it honestly —
-an idle speaker returns `{}` — but it never *pushes* the transition to empty.
-A title picked up while something was streaming therefore outlives the
-playback that produced it for as long as nobody asks again; one was observed
-still being reported twelve hours later, on a speaker that had been idle the
-whole time. Nothing here infers power from it, and the media title is withheld
-while the speaker is in standby. Network playback is left to whichever
-integration owns that stream — a Cast or Music Assistant entity for the same
-speaker knows about it first-hand, and this integration reports the amplifier.
+**PLAY_INFO is announced but never retracted.** The speaker pushes a track as
+soon as something starts streaming to the network input, and then says nothing
+when it stops. It does answer a direct query honestly — an idle speaker
+returns `{}` — so the end of playback is only ever discoverable by asking. A
+cached title left unchecked was observed still being reported twelve hours
+later, holding the entity awake the whole time.
+
+So this is the one thing the integration asks about: while a track is cached on
+the network input, `PLAY_INFO` is re-requested once a minute until the speaker
+says it is empty. That window is also the only time the speaker is either
+certainly awake or has just gone quiet, which is what keeps a push-only design
+honest without waking anything up. In every other state nothing is sent.
+
+An empty reply has to *replace* the cache rather than merge into it — merging
+an empty payload is a no-op, which is precisely how the stale track survived.
 
 **The speaker's own input list is wrong.** It advertises
 `ai_func_list = [0, 1, 15, 6, 19]`, but sweeping every index shows the ones it
@@ -77,7 +83,7 @@ advertised list.
 (`i_woofer_level: 21`). Writing 0, 3 and 15 reads back verbatim, and writing
 -3 reads back as 3. So `dB = raw + min`, and the conversion is done here.
 
-**Never poll.** Any request wakes the speaker and turns its display back on.
+**Barely poll.** Requests are avoided because they light the front panel; the sole exception is the playback check above.
 This integration fetches once at startup and then relies entirely on the
 device's push messages, which arrive within a second of a real change.
 

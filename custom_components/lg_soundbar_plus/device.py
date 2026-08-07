@@ -17,8 +17,10 @@ from typing import Any
 import temescal
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
+    PLAYBACK_CHECK_INTERVAL,
     MSG_EQ,
     MSG_FUNC,
     MSG_PLAY,
@@ -64,6 +66,7 @@ class LGSoundbarDevice:
         # answered by the time they returned.
         self._seen: set[str] = set()
         self._dump_complete = asyncio.Event()
+        self._cancel_check: Callable[[], None] | None = None
 
         # Last payload seen per message type. The device sends partial updates
         # (a volume change carries only the volume fields), so these are merged
@@ -93,6 +96,10 @@ class LGSoundbarDevice:
             async with asyncio.timeout(INITIAL_DUMP_TIMEOUT):
                 await self._dump_complete.wait()
 
+        self._cancel_check = async_track_time_interval(
+            self.hass, self._async_check_playback, PLAYBACK_CHECK_INTERVAL
+        )
+
         if missing := INITIAL_DUMP - self._seen:
             # Not fatal — the media player still works off whatever arrives
             # later — but entities keyed off the missing message will be absent
@@ -111,8 +118,30 @@ class LGSoundbarDevice:
         )
         self.available = True
 
+    async def _async_check_playback(self, _now: Any) -> None:
+        """Ask whether network playback we believe is running still is.
+
+        The speaker announces the start of playback but never its end, so a
+        cached track would otherwise hold the entity awake indefinitely. It
+        does answer a direct query honestly — an idle speaker returns an empty
+        PLAY_INFO — so this asks.
+
+        It only asks while there is a cached track on the network input, which
+        bounds the cost: either the speaker is genuinely playing and is awake
+        anyway, or playback has just ended and the first reply clears the cache
+        and stops the questions. Every other state sends nothing at all.
+        """
+        if self._speaker is None or not self.available:
+            return
+        if self.source_id != SOURCE_IDLE or not self.play:
+            return
+        await self.hass.async_add_executor_job(self._speaker.get_play)
+
     async def async_shutdown(self) -> None:
         """Close the socket."""
+        if self._cancel_check is not None:
+            self._cancel_check()
+            self._cancel_check = None
         speaker = self._speaker
         self._speaker = None
         self.available = False
@@ -164,7 +193,13 @@ class LGSoundbarDevice:
         elif msg == MSG_EQ:
             self.eq.update(data)
         elif msg == MSG_PLAY:
-            self.play.update(data)
+            # An empty PLAY_INFO is the speaker saying nothing is playing, so
+            # it has to replace the cache rather than merge into it — merging
+            # an empty dict is what let a finished track live on forever.
+            if data:
+                self.play.update(data)
+            else:
+                self.play.clear()
         elif msg == MSG_PRODUCT:
             self.product.update(data)
         else:
@@ -234,24 +269,20 @@ class LGSoundbarDevice:
 
     @property
     def is_on(self) -> bool:
-        """Whether a real input is selected.
+        """Whether the speaker is awake.
 
-        This hardware never sends b_powerstatus, so the selected input is all
-        there is to go on: the speaker parks on the network input (0) and moves
-        to a physical one when it wakes.
-
-        Network playback deliberately does not count. PLAY_INFO would be the
-        only way to spot it, and it cannot be trusted here: the speaker answers
-        a query for it truthfully but never pushes the transition to empty, so
-        a cached title outlives the playback that produced it indefinitely —
-        observed still reporting a streaming app twelve hours after the fact.
-        Whatever is streaming over the network already has its own media player
-        entity in Home Assistant; this one reports the amplifier.
+        This hardware never sends b_powerstatus, so it comes down to the
+        selected input plus what is playing. A physical input means awake. The
+        network input is where the speaker parks in standby, so that only
+        counts as awake while something is actually streaming over it — which
+        is what PLAY_INFO reports, kept honest by _async_check_playback.
         """
         source_id = self.source_id
         if source_id is None:
             return False
-        return source_id != SOURCE_IDLE
+        if source_id != SOURCE_IDLE:
+            return True
+        return bool(self.play.get("s_title") or self.play.get("i_stream_type"))
 
     def setting_int(self, key: str) -> int | None:
         """Read an int out of SETTING_VIEW_INFO."""

@@ -8,6 +8,7 @@ tables disagree with what this hardware reports.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Final
 
 DOMAIN: Final = "lg_soundbar_plus"
@@ -120,5 +121,11 @@ SLEEP_MAX: Final = 180
 # input. It is used anyway because it is the only standby-adjacent command that
 # the hardware acknowledges at all.
 TURN_OFF_SLEEP_MINUTES: Final = 1
+
+# How often to re-ask whether network playback is still running. This is the
+# one thing the speaker starts announcing and then never retracts, so it is the
+# only thing worth a question — and the question is only asked while a track is
+# cached on the network input. See LGSoundbarDevice._async_check_playback.
+PLAYBACK_CHECK_INTERVAL: Final = timedelta(seconds=60)
 
 SIGNAL_UPDATE: Final = f"{DOMAIN}_update"

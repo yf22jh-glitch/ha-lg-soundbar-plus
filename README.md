@@ -14,7 +14,8 @@ the `temescal` library.
 |---|---|---|
 | Power state | Stuck on, forever | Derived from the active input and live playback |
 | Input list | Taken from the speaker's own list, which is wrong | Verified table, so the current input is always in the list |
-| Turn off | Sends a field this hardware ignores | Arms a one-minute sleep timer — see the caveat below |
+| Power control | Sends a field this hardware ignores | Not exposed; source selection remains available explicitly |
+| Connection | A closed or fragmented socket can kill updates | Buffers complete frames and reconnects without polling |
 | Speaker trim | — | Woofer, rear, centre, top |
 | Settings | — | DRC, Neural:X, night mode, auto volume, auto power, TV remote, rear speakers |
 | Sleep timer | — | Exposed as a number |
@@ -50,18 +51,27 @@ rather than something still to be found. Note also that the LG app itself
 offers no sleep control for this model.
 
 A one-minute sleep timer is the closest thing found, and it is not enough. The
-timer is accepted, counts down, and clears itself — and the speaker stays
-awake on the same input. Measured end to end: the timer was armed at 11:07:44
-and had cleared itself by 11:09:43, and eighty minutes later a fresh
-connection asked `get_func()` and got `i_curr_func: 4` back in under a second,
-with the TV off the whole time. `turn_off` therefore arms a timer rather than
-turning anything off, which is the honest description of what it does.
+timer is accepted, counts down, and clears itself — and the speaker stays awake
+on the same input. Measured end to end: the timer was armed at 11:07:44 and had
+cleared itself by 11:09:43, and eighty minutes later a fresh connection asked
+`get_func()` and got `i_curr_func: 4` back in under a second, with the TV off
+the whole time. The media player therefore exposes neither `turn_on` nor
+`turn_off`; the sleep timer remains a separately named number entity.
 
-**Standby is not announced.** Over the same eighty minutes the speaker pushed
-nothing at all, on a socket that had never reconnected (`bytes_sent` still
-carried the original requests). Power state is therefore read from the
-selected input: the speaker parks on the network input in standby and moves to
-a physical one when it wakes.
+**There is no dedicated standby announcement.** Power state is therefore read
+from the selected input: the speaker parks on the network input in standby and
+moves to a physical one when it wakes. This is deliberately exposed as a
+`standby_inferred` attribute rather than claimed as a hardware power sensor.
+`transport_connected` and `last_device_update` make it possible to distinguish
+that inference from a dead, stale listener.
+
+**The archived client is not a safe TCP stream reader.** Its listener assumes
+that each `recv()` returns exactly one requested header or payload, although
+TCP may fragment or combine them. Its reconnect error path can also terminate
+the listener, and command errors are swallowed. This integration buffers full
+frames, uses `sendall()`, reports socket availability, and reconnects with
+backoff. A reconnect sends no state query by itself, because queries light the
+front panel and can postpone the soundbar's own unused-device sleep.
 
 **PLAY_INFO is announced but never retracted.** The speaker pushes a track as
 soon as something starts streaming to the network input, and then says nothing
@@ -111,10 +121,10 @@ this integration handles input, sound mode, trim and settings.
 
 - **Turning off does not work on the SN series**, and on the evidence above it
   cannot be made to: there is no power command this firmware answers, and no
-  power status field to read back. `turn_off` arms a one-minute sleep timer
-  because that is the only standby-adjacent write the bar acknowledges at all —
-  treat it as "start a sleep timer", not as power off. On bars that report
-  `b_powerstatus`, `b_powerkey: false` is the real thing and belongs here.
+  power status field to read back. Power actions are intentionally not exposed.
+  The separately named sleep-timer entity only schedules a timer. On bars that
+  report `b_powerstatus`, `b_powerkey: false` is the real thing and belongs in a
+  future model-specific implementation.
 - **AV sync** is not exposed yet. The bar reports `i_av_sync` without bounds;
   the scale is 1–30 in 10 ms steps (0–300 ms), which the S95TR work above
   establishes, so this is implementable rather than unknown.

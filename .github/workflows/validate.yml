@@ -10,6 +10,19 @@ on:
     - cron: "0 6 * * *"
 
 jobs:
+  unit-tests:
+    name: Transport regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install pytest temescal==0.5
+      - name: Run tests
+        run: pytest -q
+
   hassfest:
     name: hassfest (HA manifest/structure)
     runs-on: ubuntu-latest
@@ -55,6 +68,7 @@ jobs:
               "lg_soundbar_plus.media_player",
               "lg_soundbar_plus.number",
               "lg_soundbar_plus.switch",
+              "lg_soundbar_plus.transport",
           ]:
               importlib.import_module(module)
               print("ok", module)

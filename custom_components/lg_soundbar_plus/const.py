@@ -112,16 +112,6 @@ SLEEP_OFF: Final = -1
 SLEEP_MIN: Final = 1
 SLEEP_MAX: Final = 180
 
-# turn_off has no direct command on this hardware. b_powerkey (what the core
-# integration sends) is ignored outright: it produces no response and no state
-# change, matching reports from other LG soundbar owners.
-#
-# A one-minute sleep timer is the nearest thing, and it is not sufficient: the
-# device accepts it, counts it down, clears it, and stays awake on the same
-# input. It is used anyway because it is the only standby-adjacent command that
-# the hardware acknowledges at all.
-TURN_OFF_SLEEP_MINUTES: Final = 1
-
 # How often to re-ask whether network playback is still running. This is the
 # one thing the speaker starts announcing and then never retracts, so it is the
 # only thing worth a question — and the question is only asked while a track is

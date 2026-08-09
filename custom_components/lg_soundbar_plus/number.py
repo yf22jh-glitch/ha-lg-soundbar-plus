@@ -122,9 +122,8 @@ class LGSoundbarLevel(LGSoundbarEntity, NumberEntity):
 class LGSoundbarSleepTimer(LGSoundbarEntity, NumberEntity):
     """Sleep timer in minutes; 0 turns it off.
 
-    This is also what the media player's turn_off writes to, for want of a
-    working power command — though the timer has been seen expiring without
-    sending the speaker to standby, so it is not a dependable one.
+    Kept separate from media-player power controls because the timer has been
+    seen expiring without sending the speaker to standby.
     """
 
     _attr_entity_category = EntityCategory.CONFIG

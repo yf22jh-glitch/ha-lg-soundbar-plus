@@ -12,25 +12,25 @@ import asyncio
 import logging
 from collections.abc import Callable
 from contextlib import suppress
+from datetime import UTC, datetime
 from typing import Any
-
-import temescal
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
-    PLAYBACK_CHECK_INTERVAL,
     MSG_EQ,
     MSG_FUNC,
     MSG_PLAY,
     MSG_PRODUCT,
     MSG_SETTING,
     MSG_SPK_LIST,
+    PLAYBACK_CHECK_INTERVAL,
     SOURCE_ALIASES,
     SOURCE_IDLE,
     SOURCES,
 )
+from .transport import ResilientTemescal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,9 +39,7 @@ _LOGGER = logging.getLogger(__name__)
 # up the platforms before it lands silently produces a media player and nothing
 # else. EQ_VIEW_INFO is needed for the sound mode list, SPK_LIST_VIEW_INFO for
 # the volume range, FUNC_VIEW_INFO for the current input.
-INITIAL_DUMP: frozenset[str] = frozenset(
-    {MSG_SPK_LIST, MSG_FUNC, MSG_SETTING, MSG_EQ}
-)
+INITIAL_DUMP: frozenset[str] = frozenset({MSG_SPK_LIST, MSG_FUNC, MSG_SETTING, MSG_EQ})
 
 # How long to wait for that dump. Replies normally arrive well inside a second;
 # this only has to cover a speaker that is slow to wake.
@@ -56,9 +54,10 @@ class LGSoundbarDevice:
         self.hass = hass
         self.host = host
         self.port = port
-        self._speaker: temescal.temescal | None = None
+        self._speaker: ResilientTemescal | None = None
         self._listeners: list[Callable[[], None]] = []
         self.available = False
+        self.last_device_update: datetime | None = None
 
         # Which message types have been seen, and an event fired once the first
         # dump is complete. Replies come back on temescal's listener thread, so
@@ -113,10 +112,14 @@ class LGSoundbarDevice:
 
     def _connect(self) -> None:
         """Create the temescal client (blocking)."""
-        self._speaker = temescal.temescal(
-            self.host, port=self.port, callback=self._handle_push
+        speaker = ResilientTemescal(
+            self.host,
+            port=self.port,
+            callback=self._handle_push,
+            connection_callback=self._handle_connection,
         )
-        self.available = True
+        self._speaker = speaker
+        self.available = speaker.connected
 
     async def _async_check_playback(self, _now: Any) -> None:
         """Ask whether network playback we believe is running still is.
@@ -145,15 +148,20 @@ class LGSoundbarDevice:
         speaker = self._speaker
         self._speaker = None
         self.available = False
-        if speaker is not None and speaker.socket is not None:
-            await self.hass.async_add_executor_job(self._close, speaker)
+        if speaker is not None:
+            await self.hass.async_add_executor_job(speaker.close)
 
-    @staticmethod
-    def _close(speaker: temescal.temescal) -> None:
-        try:
-            speaker.socket.close()
-        except OSError:  # already gone
-            pass
+    def _handle_connection(self, connected: bool) -> None:
+        """Pass socket liveness changes from the listener thread to HA."""
+        self.hass.loop.call_soon_threadsafe(self._set_available, connected)
+
+    @callback
+    def _set_available(self, connected: bool) -> None:
+        if self.available == connected:
+            return
+        self.available = connected
+        for listener in list(self._listeners):
+            listener()
 
     async def async_refresh(self) -> None:
         """Ask the device for a full state dump.
@@ -215,11 +223,12 @@ class LGSoundbarDevice:
         ):
             self.play.clear()
 
-        self.available = True
+        self.last_device_update = datetime.now(UTC)
         self.hass.loop.call_soon_threadsafe(self._notify, msg)
 
     @callback
     def _notify(self, msg: str) -> None:
+        self.available = True
         self._seen.add(msg)
         if not self._dump_complete.is_set() and INITIAL_DUMP <= self._seen:
             self._dump_complete.set()
@@ -246,9 +255,7 @@ class LGSoundbarDevice:
     def name(self) -> str:
         """Friendly name the speaker reports for itself."""
         return (
-            self.spk.get("s_user_name")
-            or self.setting.get("s_user_name")
-            or self.host
+            self.spk.get("s_user_name") or self.setting.get("s_user_name") or self.host
         )
 
     @property
@@ -303,9 +310,7 @@ class LGSoundbarDevice:
         speaker = self._speaker
         if speaker is None:
             return
-        await self.hass.async_add_executor_job(
-            getattr(speaker, method), *args
-        )
+        await self.hass.async_add_executor_job(getattr(speaker, method), *args)
 
     async def async_send(self, packet: dict[str, Any]) -> None:
         """Send a raw packet for fields temescal has no helper for."""

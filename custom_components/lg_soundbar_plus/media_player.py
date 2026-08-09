@@ -13,17 +13,11 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from . import LGSoundbarConfigEntry
 from .const import (
     EQUALISERS,
-    SOURCE_IDLE,
     SOURCE_IDS,
     SOURCES,
-    TURN_OFF_SLEEP_MINUTES,
 )
 from .device import LGSoundbarDevice
 from .entity import LGSoundbarEntity
-
-# Where turn_on sends the speaker when nothing better is known. Optical is the
-# input a TV-attached soundbar wakes to in practice.
-DEFAULT_WAKE_SOURCE = 4
 
 
 async def async_setup_entry(
@@ -43,8 +37,6 @@ class LGSoundbarMediaPlayer(LGSoundbarEntity, MediaPlayerEntity):
         MediaPlayerEntityFeature.VOLUME_SET
         | MediaPlayerEntityFeature.VOLUME_STEP
         | MediaPlayerEntityFeature.VOLUME_MUTE
-        | MediaPlayerEntityFeature.TURN_ON
-        | MediaPlayerEntityFeature.TURN_OFF
         | MediaPlayerEntityFeature.SELECT_SOURCE
         | MediaPlayerEntityFeature.SELECT_SOUND_MODE
     )
@@ -53,15 +45,11 @@ class LGSoundbarMediaPlayer(LGSoundbarEntity, MediaPlayerEntity):
         """Initialise the media player."""
         super().__init__(device, unique_id)
         self._attr_unique_id = unique_id
-        self._last_active_source = DEFAULT_WAKE_SOURCE
 
     @property
     def state(self) -> MediaPlayerState:
         """Whether the speaker is awake."""
         if self.device.is_on:
-            source_id = self.device.source_id
-            if source_id is not None and source_id != SOURCE_IDLE:
-                self._last_active_source = source_id
             return MediaPlayerState.ON
         return MediaPlayerState.OFF
 
@@ -163,28 +151,6 @@ class LGSoundbarMediaPlayer(LGSoundbarEntity, MediaPlayerEntity):
         await self.device.async_call("set_eq", EQUALISERS.index(sound_mode))
 
     # ------------------------------------------------------------------
-    # power
-    # ------------------------------------------------------------------
-
-    async def async_turn_on(self) -> None:
-        """Wake the speaker by selecting its last real input."""
-        await self.device.async_call("set_func", self._last_active_source)
-
-    async def async_turn_off(self) -> None:
-        """Arm a one-minute sleep timer.
-
-        This does not reliably reach standby, and nothing found so far does.
-        The b_powerkey field the core integration uses is ignored outright —
-        no response, no state change, with or without an input signal. The
-        sleep timer at least gets accepted, but it has been observed counting
-        down, clearing itself, and leaving the speaker awake on the same input.
-
-        It stays wired up because the LG app can put this hardware to sleep, so
-        a real command exists; this is where it goes once it is identified.
-        """
-        await self.device.async_call("set_sleep_time", TURN_OFF_SLEEP_MINUTES)
-
-    # ------------------------------------------------------------------
     # now playing
     # ------------------------------------------------------------------
 
@@ -208,15 +174,22 @@ class LGSoundbarMediaPlayer(LGSoundbarEntity, MediaPlayerEntity):
         return (self.device.play.get("s_artist") or "").strip() or None
 
     @property
-    def extra_state_attributes(self) -> dict[str, int | str]:
-        """Expose the raw input index, which is useful when mapping a new model."""
-        attributes: dict[str, int | str] = {}
+    def extra_state_attributes(self) -> dict[str, bool | int | str]:
+        """Expose raw and inferred state for diagnostics and dashboards."""
+        attributes: dict[str, bool | int | str] = {
+            "standby_inferred": not self.device.is_on,
+            "transport_connected": self.device.available,
+        }
         source_id = self.device.source_id
         if source_id is not None:
             attributes["source_index"] = source_id
         sleep = self.device.setting_int("i_sleep_time")
         if sleep is not None and sleep > 0:
             attributes["sleep_timer_minutes"] = sleep
+        if self.device.last_device_update is not None:
+            attributes["last_device_update"] = (
+                self.device.last_device_update.isoformat()
+            )
         return attributes
 
     async def async_update(self) -> None:

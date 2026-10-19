@@ -100,6 +100,8 @@ class ResilientTemescal(temescal.temescal):
             raise ConnectionError("Soundbar transport is closed")
 
         with self._connect_lock:
+            if self._stopped.is_set():
+                raise ConnectionError("Soundbar transport is closed")
             if self.connected:
                 return
             new_socket = socket.create_connection(
@@ -107,15 +109,24 @@ class ResilientTemescal(temescal.temescal):
             )
             # A blocking receive is intentional. close() interrupts it, and
             # time-based polling would wake the soundbar for no useful state.
-            new_socket.settimeout(None)
+            try:
+                new_socket.settimeout(None)
+            except BaseException:
+                self._close_socket(new_socket)
+                raise
             with self._socket_lock:
+                if self._stopped.is_set():
+                    self._close_socket(new_socket)
+                    raise ConnectionError("Soundbar transport closed during connect")
                 old_socket = self.socket
                 self.socket = new_socket
                 changed = not self._connected
                 self._connected = True
+                # Serialize notifications with close/drop so an old connect
+                # cannot report success after the disconnect notification.
+                if changed:
+                    self._notify_connection(True)
             self._close_socket(old_socket)
-            if changed:
-                self._notify_connection(True)
 
     def listen(self) -> None:
         """Read complete frames forever, reconnecting after EOF or socket errors."""
@@ -202,8 +213,9 @@ class ResilientTemescal(temescal.temescal):
 
     def close(self) -> None:
         """Stop reconnection and close the active socket."""
-        self._stopped.set()
-        self._drop_socket(self._current_socket())
+        with self._socket_lock:
+            self._stopped.set()
+            self._drop_socket(self.socket)
         thread = getattr(self, "thread", None)
         if thread is not None and thread is not current_thread():
             thread.join(timeout=CONNECT_TIMEOUT + 1)
@@ -222,9 +234,9 @@ class ResilientTemescal(temescal.temescal):
             self.socket = None
             changed = self._connected
             self._connected = False
+            if changed:
+                self._notify_connection(False)
         self._close_socket(expected)
-        if changed:
-            self._notify_connection(False)
 
     @staticmethod
     def _close_socket(sock: socket.socket | None) -> None:
